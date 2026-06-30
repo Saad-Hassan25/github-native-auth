@@ -1,6 +1,6 @@
 # 🔐 GitHub-Native Auth Kit
 
-> A complete, multi-user web app with **no backend** — authentication, database,
+> A complete, multi-user web app with **no backend** - authentication, database,
 > and automation all run on GitHub itself.
 
 ![stack](https://img.shields.io/badge/stack-GitHub%20Pages%20%2B%20Issues%20%2B%20Actions-34d399?style=for-the-badge)
