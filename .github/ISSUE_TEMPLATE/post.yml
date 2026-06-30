@@ -1,0 +1,46 @@
+# An Issue Form. When someone clicks "New issue → Share a post" on GitHub,
+# they get these fields and the issue is auto-labeled `post` so both the web
+# app and the notification workflow pick it up.
+name: ✦ Share a post
+description: Add a finding, idea, or link to the hub.
+title: "[Post] "
+labels: ["post"]
+body:
+  - type: markdown
+    attributes:
+      value: "Posts created here show up in the web app (they're just labeled issues)."
+  - type: input
+    id: summary
+    attributes:
+      label: Title
+      placeholder: A short, clear headline
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: What is it? Why does it matter? Markdown is supported.
+      placeholder: Write your post here…
+    validations:
+      required: true
+  - type: input
+    id: link
+    attributes:
+      label: Source link (optional)
+      placeholder: https://…
+    validations:
+      required: false
+  - type: dropdown
+    id: tag
+    attributes:
+      label: Tag
+      description: Adds a second label used for filtering.
+      options:
+        - idea
+        - research
+        - tool
+        - question
+        - win
+    validations:
+      required: false

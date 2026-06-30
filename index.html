@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GitHub-Native Auth Demo</title>
+<meta name="description" content="A no-backend web app authenticated entirely with GitHub: Pages for hosting, Issues as a database, Actions for automation." />
+<style>
+  /* ============================================================
+     STYLES — small, dependency-free, deliberately flat.
+     Square corners, a single restrained palette, no gradients.
+     The interesting part of this project is the auth logic in
+     the script block below, not the CSS.
+     ============================================================ */
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2128;
+    --field: #010409;
+    --border: #30363d;
+    --border-strong: #444c56;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --link: #2f81f7;
+    --btn: #238636;
+    --btn-hover: #2ea043;
+    --danger: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    line-height: 1.5;
+    font-size: 14px;
+  }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 700px; margin: 0 auto; padding: 32px 16px 80px; }
+
+  /* Top bar */
+  header.bar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 16px; margin-bottom: 24px;
+    background: var(--panel); border: 1px solid var(--border);
+  }
+  .logo { font-weight: 600; font-size: 15px; }
+  .bar .spacer { flex: 1; }
+  .who { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+  .who img { width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--border); }
+
+  /* Cards / panels */
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    padding: 24px; margin-bottom: 16px;
+  }
+  .card h1 { margin: 0 0 8px; font-size: 20px; font-weight: 600; }
+  .card h2 { margin: 0 0 16px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+  .lede { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+
+  label { display: block; font-size: 13px; font-weight: 600; color: var(--text); margin: 16px 0 6px; }
+  input, textarea, select {
+    width: 100%; padding: 9px 12px; background: var(--field);
+    color: var(--text); border: 1px solid var(--border);
+    font-size: 14px; font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 90px; }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--link); box-shadow: 0 0 0 1px var(--link); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+  button {
+    cursor: pointer; border: 1px solid transparent; font-size: 14px;
+    font-weight: 600; padding: 9px 16px; font-family: inherit;
+  }
+  .btn-primary { background: var(--btn); color: #fff; border-color: rgba(240,246,252,.1); width: 100%; margin-top: 20px; }
+  .btn-primary:hover { background: var(--btn-hover); }
+  .btn-primary:disabled { opacity: .6; cursor: not-allowed; }
+  .btn-ghost { background: var(--panel); color: var(--text); border-color: var(--border); }
+  .btn-ghost:hover { background: var(--panel-2); border-color: var(--border-strong); }
+  .btn-link { background: none; border: none; color: var(--link); padding: 8px 0 0; font-weight: 500; }
+  .btn-link:hover { text-decoration: underline; }
+
+  .pin-input { letter-spacing: 6px; font-size: 16px; }
+
+  /* Compose / feed */
+  .compose textarea { min-height: 72px; }
+  .tagrow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .tag {
+    font-size: 12px; padding: 4px 10px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--field); color: var(--muted);
+    user-select: none;
+  }
+  .tag:hover { border-color: var(--border-strong); }
+  .tag.on { background: rgba(47,129,247,.12); border-color: var(--link); color: var(--text); }
+
+  .post { background: var(--panel); border: 1px solid var(--border); padding: 16px; margin-bottom: 12px; }
+  .post h3 { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
+  .post .meta { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+  .post .meta img { width: 18px; height: 18px; border-radius: 50%; }
+  .post .body { font-size: 14px; color: #c9d1d9; white-space: pre-wrap; word-break: break-word; }
+  .post .labels { margin-top: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .post .labels span { font-size: 11px; padding: 2px 8px; background: var(--field); border: 1px solid var(--border); color: var(--muted); }
+  .post .actions { margin-top: 14px; display: flex; gap: 12px; align-items: center; }
+  .post .react { background: var(--field); border: 1px solid var(--border); color: var(--text); padding: 4px 12px; font-size: 13px; }
+  .post .react:hover { border-color: var(--border-strong); }
+  .post a.open { font-size: 13px; color: var(--link); margin-left: auto; }
+
+  .toolbar { display: flex; gap: 8px; margin-bottom: 16px; }
+  .toolbar input { flex: 1; }
+  .toolbar .btn-ghost { white-space: nowrap; }
+
+  .empty { text-align: center; color: var(--muted); padding: 48px 16px; border: 1px dashed var(--border); }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--link); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Toast */
+  #toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(150%);
+    background: var(--panel-2); border: 1px solid var(--border-strong); color: var(--text);
+    padding: 10px 16px; font-size: 13px; transition: transform .2s ease;
+    max-width: 90vw; z-index: 50;
+  }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+  #toast.err { border-color: var(--danger); }
+
+  .callout { font-size: 13px; color: var(--muted); background: var(--field); border: 1px solid var(--border); padding: 12px 14px; margin-top: 20px; }
+  .callout strong { color: var(--text); }
+  code { background: rgba(110,118,129,.2); padding: 1px 6px; font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+</style>
+</head>
+<body>
+  <div class="wrap" id="app"><!-- rendered by JS --></div>
+  <div id="toast"></div>
+
+<script>
+/* ============================================================================
+ * GitHub-Native Auth Demo
+ * ----------------------------------------------------------------------------
+ * A complete web app with NO backend server. Everything runs in the browser
+ * and is powered entirely by GitHub:
+ *
+ *   • GitHub Pages   → hosts this static file
+ *   • GitHub Issues  → the database (one issue = one post)
+ *   • GitHub Actions → automation (notify a channel when a post is created)
+ *   • GitHub PAT     → authentication (each user brings their own token)
+ *
+ * THE AUTH MODEL (this is the interesting bit):
+ *   1. A user signs in ONCE by pasting a fine-grained Personal Access Token.
+ *   2. We call GET /user to confirm who they are (username + avatar).
+ *   3. We ask them to choose a PIN, then encrypt the token with that PIN
+ *      using the Web Crypto API (PBKDF2 + AES-GCM) and store the ciphertext
+ *      in localStorage — ON THEIR DEVICE ONLY.
+ *   4. On later visits they just type the PIN; we decrypt the token locally.
+ *
+ *   The token is NEVER written to the repo, a config file, or any server.
+ *   The PIN never leaves the browser either. If the device is lost, nothing
+ *   useful is stored in this project's repo. See docs/AUTHENTICATION.md.
+ * ========================================================================== */
+
+/* ----------------------------------------------------------------------------
+ * 1. CONFIG  — the only part you must edit when you fork this template.
+ *    (There are no secrets here on purpose.)
+ * -------------------------------------------------------------------------- */
+const CONFIG = {
+  APP_NAME: "Pulse",                       // shown in the header
+  REPO: "OWNER/REPO",                       // e.g. "octocat/knowledge-hub" — your repo
+  LABEL: "post",                            // issues with this label are treated as posts
+  AVAILABLE_TAGS: ["idea", "research", "tool", "question", "win"],
+  PIN_LENGTH: 4,                            // how many digits the unlock PIN has
+  TOKEN_HELP_URL: "https://github.com/settings/tokens?type=beta"
+};
+
+const API = "https://api.github.com";
+const VAULT_KEY = "ghauth_vault";          // localStorage key for the encrypted token
+
+/* ----------------------------------------------------------------------------
+ * 2. CRYPTO  — turn a PIN into a key, then encrypt/decrypt the token with it.
+ *    Uses the browser-native Web Crypto API. No libraries.
+ * -------------------------------------------------------------------------- */
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+const toB64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const fromB64 = (str) => Uint8Array.from(atob(str), (c) => c.charCodeAt(0));
+
+// Derive a 256-bit AES-GCM key from the user's PIN + a random salt (PBKDF2).
+async function deriveKey(pin, salt) {
+  const baseKey = await crypto.subtle.importKey(
+    "raw", enc.encode(pin), "PBKDF2", false, ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations: 250000, hash: "SHA-256" },
+    baseKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+// Encrypt the token with the PIN. Returns a plain object safe to store locally.
+async function encryptToken(token, pin) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveKey(pin, salt);
+  const ct = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv }, key, enc.encode(token)
+  );
+  return { salt: toB64(salt), iv: toB64(iv), ct: toB64(ct) };
+}
+
+// Decrypt the stored token. Throws if the PIN is wrong (AES-GCM auth fails).
+async function decryptToken(blob, pin) {
+  const key = await deriveKey(pin, fromB64(blob.salt));
+  const plain = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: fromB64(blob.iv) }, key, fromB64(blob.ct)
+  );
+  return dec.decode(plain);
+}
+
+/* ----------------------------------------------------------------------------
+ * 3. VAULT  — the encrypted token + public profile, kept in localStorage.
+ *    Token is in `vault.enc` (encrypted). Profile fields are plaintext so we
+ *    can greet the user before they unlock.
+ * -------------------------------------------------------------------------- */
+function loadVault() {
+  try { return JSON.parse(localStorage.getItem(VAULT_KEY) || "null"); }
+  catch { return null; }
+}
+function saveVault(v) { localStorage.setItem(VAULT_KEY, JSON.stringify(v)); }
+function clearVault() { localStorage.removeItem(VAULT_KEY); }
+
+/* ----------------------------------------------------------------------------
+ * 4. GITHUB API  — thin fetch wrapper. The user's token is the only credential.
+ * -------------------------------------------------------------------------- */
+async function gh(path, { method = "GET", body = null, token } = {}) {
+  const res = await fetch(API + path, {
+    method,
+    headers: {
+      "Accept": "application/vnd.github+json",
+      "Authorization": "Bearer " + token,
+      "X-GitHub-Api-Version": "2022-11-28"
+    },
+    body: body ? JSON.stringify(body) : null
+  });
+  if (!res.ok) {
+    let msg = res.status + " " + res.statusText;
+    try { const j = await res.json(); if (j.message) msg = j.message; } catch {}
+    throw new Error(msg);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+/* ----------------------------------------------------------------------------
+ * 5. APP STATE + tiny render router
+ * -------------------------------------------------------------------------- */
+const state = {
+  view: "loading",   // loading | setup | unlock | app
+  token: null,
+  user: null,        // { login, name, avatar_url }
+  posts: [],
+  selectedTags: [],
+  search: "",
+  busy: false
+};
+
+const app = document.getElementById("app");
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function toast(msg, isErr = false) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.className = "show" + (isErr ? " err" : "");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => (t.className = ""), 3200);
+}
+
+function header() {
+  if (!state.user) return "";
+  return `<header class="bar">
+    <div class="logo">${esc(CONFIG.APP_NAME)}</div>
+    <div class="spacer"></div>
+    <div class="who">
+      <img src="${esc(state.user.avatar_url)}" alt="">
+      <span>@${esc(state.user.login)}</span>
+    </div>
+    <button class="btn-ghost" id="logout">Lock</button>
+  </header>`;
+}
+
+function render() {
+  if (state.view === "loading") {
+    app.innerHTML = `<div class="card"><p class="lede"><span class="spinner"></span> Loading…</p></div>`;
+    return;
+  }
+  if (state.view === "setup") return renderSetup();
+  if (state.view === "unlock") return renderUnlock();
+  if (state.view === "app") return renderApp();
+}
+
+/* ----------------------------------------------------------------------------
+ * 6. VIEW: first-time setup  (paste token once → set a PIN)
+ * -------------------------------------------------------------------------- */
+function renderSetup() {
+  app.innerHTML = `
+  <div class="card">
+    <h1>Sign in to ${esc(CONFIG.APP_NAME)}</h1>
+    <p class="lede">Sign in once with a GitHub token. We confirm who you are, then
+    let you set a PIN so you never paste the token again on this device.</p>
+
+    <label for="tok">GitHub Personal Access Token (one time)</label>
+    <input id="tok" type="password" placeholder="github_pat_… or ghp_…" autocomplete="off">
+    <div class="hint">
+      <a href="${esc(CONFIG.TOKEN_HELP_URL)}" target="_blank" rel="noopener">Create a fine-grained token →</a>
+      &nbsp;Scope it to <code>${esc(CONFIG.REPO)}</code> with <b>Issues: Read &amp; write</b>.
+    </div>
+
+    <label for="pin">Choose a ${CONFIG.PIN_LENGTH}-digit PIN</label>
+    <input id="pin" class="pin-input" type="password" inputmode="numeric"
+           maxlength="${CONFIG.PIN_LENGTH}" placeholder="••••" autocomplete="off">
+    <div class="hint">Used to unlock your token on this device. It never leaves your browser.</div>
+
+    <button class="btn-primary" id="go">Verify &amp; secure</button>
+
+    <div class="callout">
+      <strong>Note:</strong> Your token is encrypted with your PIN (AES-GCM) and stored
+      only in this browser. It is never sent to any server or saved in the repo.
+    </div>
+  </div>`;
+
+  const go = document.getElementById("go");
+  go.addEventListener("click", doSetup);
+  document.getElementById("pin").addEventListener("keydown",
+    (e) => { if (e.key === "Enter") doSetup(); });
+}
+
+async function doSetup() {
+  const token = document.getElementById("tok").value.trim();
+  const pin = document.getElementById("pin").value.trim();
+  if (!token) return toast("Paste your token first.", true);
+  if (!new RegExp(`^\\d{${CONFIG.PIN_LENGTH}}$`).test(pin))
+    return toast(`PIN must be exactly ${CONFIG.PIN_LENGTH} digits.`, true);
+
+  setBusy(true, "go", "Verifying…");
+  try {
+    // (a) Prove the token is valid and learn the identity behind it.
+    const user = await gh("/user", { token });
+    // (b) Encrypt the token with the PIN and persist locally.
+    const encBlob = await encryptToken(token, pin);
+    saveVault({
+      login: user.login,
+      name: user.name || user.login,
+      avatar_url: user.avatar_url,
+      enc: encBlob,
+      createdAt: new Date().toISOString()
+    });
+    state.token = token;
+    state.user = user;
+    state.view = "app";
+    render();
+    loadPosts();
+    toast("Signed in as @" + user.login);
+  } catch (e) {
+    toast("Token check failed: " + e.message, true);
+    setBusy(false, "go", "Verify & secure");
+  }
+}
+
+/* ----------------------------------------------------------------------------
+ * 7. VIEW: returning user  (enter PIN → decrypt token locally)
+ * -------------------------------------------------------------------------- */
+function renderUnlock() {
+  const v = loadVault();
+  app.innerHTML = `
+  <div class="card">
+    <h1>Welcome back</h1>
+    <p class="lede">
+      <img src="${esc(v.avatar_url)}" alt="" style="width:22px;height:22px;border-radius:50%;vertical-align:-5px;">
+      Signed in as <b>@${esc(v.login)}</b>. Enter your PIN to unlock.
+    </p>
+
+    <label for="pin">PIN</label>
+    <input id="pin" class="pin-input" type="password" inputmode="numeric"
+           maxlength="${CONFIG.PIN_LENGTH}" placeholder="••••" autocomplete="off" autofocus>
+
+    <button class="btn-primary" id="go">Unlock</button>
+    <button class="btn-link" id="forget" style="margin-top:10px;">Use a different token / forget this device</button>
+  </div>`;
+
+  document.getElementById("go").addEventListener("click", doUnlock);
+  document.getElementById("pin").addEventListener("keydown",
+    (e) => { if (e.key === "Enter") doUnlock(); });
+  document.getElementById("forget").addEventListener("click", () => {
+    clearVault(); state.view = "setup"; render();
+  });
+}
+
+async function doUnlock() {
+  const v = loadVault();
+  const pin = document.getElementById("pin").value.trim();
+  if (!pin) return toast("Enter your PIN.", true);
+
+  setBusy(true, "go", "Unlocking…");
+  try {
+    const token = await decryptToken(v.enc, pin);   // throws on wrong PIN
+    // Re-validate in case the token was revoked/expired since last time.
+    const user = await gh("/user", { token });
+    state.token = token;
+    state.user = user;
+    state.view = "app";
+    render();
+    loadPosts();
+  } catch (e) {
+    // AES-GCM failure (wrong PIN) and an invalid token both land here.
+    const wrongPin = /operation-specific|decrypt|tag/i.test(e.message) || e.name === "OperationError";
+    toast(wrongPin ? "Wrong PIN." : "Token no longer valid — re-link below.", true);
+    setBusy(false, "go", "Unlock");
+  }
+}
+
+/* ----------------------------------------------------------------------------
+ * 8. VIEW: the app  (Issues-as-database feed + composer)
+ * -------------------------------------------------------------------------- */
+function renderApp() {
+  if (CONFIG.REPO === "OWNER/REPO") {
+    app.innerHTML = header() + `<div class="card">
+      <h2>Configuration needed</h2>
+      <p class="lede">Edit <code>CONFIG.REPO</code> at the top of <code>index.html</code>
+      to point at your own repository, then reload.</p></div>`;
+    bindLogout();
+    return;
+  }
+
+  const tagChips = CONFIG.AVAILABLE_TAGS.map((t) =>
+    `<span class="tag ${state.selectedTags.includes(t) ? "on" : ""}" data-tag="${esc(t)}">${esc(t)}</span>`
+  ).join("");
+
+  app.innerHTML = header() + `
+    <div class="card compose">
+      <h2>New post</h2>
+      <input id="title" placeholder="Title">
+      <textarea id="bodytext" placeholder="What did you find? (Markdown supported)"></textarea>
+      <div class="tagrow">${tagChips}</div>
+      <button class="btn-primary" id="post">Post</button>
+    </div>
+
+    <div class="toolbar">
+      <input id="search" placeholder="Search posts…" value="${esc(state.search)}">
+      <button class="btn-ghost" id="refresh">Refresh</button>
+    </div>
+
+    <div id="feed">${renderFeed()}</div>`;
+
+  bindLogout();
+  document.querySelectorAll(".tag").forEach((el) =>
+    el.addEventListener("click", () => {
+      const t = el.dataset.tag;
+      const i = state.selectedTags.indexOf(t);
+      if (i >= 0) state.selectedTags.splice(i, 1); else state.selectedTags.push(t);
+      el.classList.toggle("on");
+    }));
+  document.getElementById("post").addEventListener("click", doPost);
+  document.getElementById("refresh").addEventListener("click", loadPosts);
+  const s = document.getElementById("search");
+  s.addEventListener("input", () => {
+    state.search = s.value;
+    document.getElementById("feed").innerHTML = renderFeed();
+    bindFeed();
+  });
+  bindFeed();
+}
+
+function renderFeed() {
+  if (state.busy && !state.posts.length)
+    return `<div class="empty"><span class="spinner"></span> Loading posts…</div>`;
+
+  const q = state.search.trim().toLowerCase();
+  const posts = state.posts.filter((p) =>
+    !q || p.title.toLowerCase().includes(q) ||
+    (p.body || "").toLowerCase().includes(q) ||
+    p.user.login.toLowerCase().includes(q));
+
+  if (!posts.length)
+    return `<div class="empty">No posts yet. Be the first to share.</div>`;
+
+  return posts.map((p) => {
+    const tags = p.labels.map((l) => l.name).filter((n) => n !== CONFIG.LABEL);
+    const ups = (p.reactions && p.reactions["+1"]) || 0;
+    return `<div class="post" data-num="${p.number}">
+      <h3>${esc(p.title)}</h3>
+      <div class="meta">
+        <img src="${esc(p.user.avatar_url)}" alt="">
+        <span>@${esc(p.user.login)}</span> ·
+        <span>${new Date(p.created_at).toLocaleDateString()}</span>
+      </div>
+      <div class="body">${esc(p.body || "")}</div>
+      ${tags.length ? `<div class="labels">${tags.map((t) => `<span>${esc(t)}</span>`).join("")}</div>` : ""}
+      <div class="actions">
+        <button class="react" data-num="${p.number}">👍 <span>${ups}</span></button>
+        <a class="open" href="${esc(p.html_url)}" target="_blank" rel="noopener">Open on GitHub →</a>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function bindFeed() {
+  document.querySelectorAll(".react").forEach((b) =>
+    b.addEventListener("click", () => reactTo(b.dataset.num)));
+}
+
+/* ---- data operations against GitHub Issues -------------------------------- */
+async function loadPosts() {
+  state.busy = true;
+  if (state.view === "app") document.getElementById("feed").innerHTML = renderFeed();
+  try {
+    const issues = await gh(
+      `/repos/${CONFIG.REPO}/issues?state=open&labels=${encodeURIComponent(CONFIG.LABEL)}&per_page=50&sort=created&direction=desc`,
+      { token: state.token }
+    );
+    // The issues endpoint also returns PRs; filter them out.
+    state.posts = issues.filter((i) => !i.pull_request);
+  } catch (e) {
+    toast("Couldn't load posts: " + e.message, true);
+  } finally {
+    state.busy = false;
+    if (state.view === "app") { document.getElementById("feed").innerHTML = renderFeed(); bindFeed(); }
+  }
+}
+
+async function doPost() {
+  const title = document.getElementById("title").value.trim();
+  const body = document.getElementById("bodytext").value.trim();
+  if (!title) return toast("Give it a title.", true);
+
+  setBusy(true, "post", "Posting…");
+  try {
+    // One new Issue = one new post. The CONFIG.LABEL marks it as ours;
+    // selected tags become extra labels (GitHub creates them if missing).
+    const created = await gh(`/repos/${CONFIG.REPO}/issues`, {
+      method: "POST",
+      token: state.token,
+      body: { title, body, labels: [CONFIG.LABEL, ...state.selectedTags] }
+    });
+    state.posts.unshift(created);
+    state.selectedTags = [];
+    render();              // re-render app (clears form, shows new post)
+    toast("Post published.");
+  } catch (e) {
+    toast("Post failed: " + e.message, true);
+    setBusy(false, "post", "Post");
+  }
+}
+
+async function reactTo(num) {
+  try {
+    await gh(`/repos/${CONFIG.REPO}/issues/${num}/reactions`, {
+      method: "POST", token: state.token, body: { content: "+1" }
+    });
+    const p = state.posts.find((x) => String(x.number) === String(num));
+    if (p) { p.reactions = p.reactions || {}; p.reactions["+1"] = (p.reactions["+1"] || 0) + 1; }
+    document.getElementById("feed").innerHTML = renderFeed();
+    bindFeed();
+  } catch (e) {
+    toast("Reaction failed: " + e.message, true);
+  }
+}
+
+/* ----------------------------------------------------------------------------
+ * 9. Misc helpers + boot
+ * -------------------------------------------------------------------------- */
+function setBusy(on, btnId, label) {
+  state.busy = on;
+  const b = document.getElementById(btnId);
+  if (b) { b.disabled = on; if (label) b.innerHTML = on ? `<span class="spinner"></span> ${label}` : label; }
+}
+
+function bindLogout() {
+  const b = document.getElementById("logout");
+  if (b) b.addEventListener("click", () => {
+    // "Lock" just drops the in-memory token; the encrypted vault stays.
+    state.token = null; state.user = null; state.posts = [];
+    state.view = "unlock"; render();
+  });
+}
+
+function boot() {
+  state.view = loadVault() ? "unlock" : "setup";
+  render();
+}
+boot();
+</script>
+</body>
+</html>

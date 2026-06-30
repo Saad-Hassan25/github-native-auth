@@ -1,0 +1,102 @@
+# ============================================================================
+# GitHub Actions — automation layer
+# ----------------------------------------------------------------------------
+# Fires every time an Issue (a "post") is opened with the `post` label.
+# By default it logs a summary to a pinned tracking issue (#1). Slack, Discord
+# and email options are included below — uncomment the one you want and add the
+# matching secret under: Settings → Secrets and variables → Actions.
+#
+# This needs NO personal access token: GitHub gives the workflow a built-in
+# GITHUB_TOKEN automatically, scoped by the `permissions` block below.
+# ============================================================================
+name: 🔔 New Post Notification
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write          # lets us comment on the tracking issue
+
+jobs:
+  notify:
+    # Only run for issues that carry our app's label.
+    if: contains(github.event.issue.labels.*.name, 'post')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract details
+        id: details
+        env:
+          TITLE: ${{ github.event.issue.title }}
+          AUTHOR: ${{ github.event.issue.user.login }}
+          URL: ${{ github.event.issue.html_url }}
+        run: |
+          {
+            echo "title=$TITLE"
+            echo "author=$AUTHOR"
+            echo "url=$URL"
+          } >> "$GITHUB_OUTPUT"
+          # Tags = every label except our marker label.
+          TAGS=$(echo '${{ toJSON(github.event.issue.labels.*.name) }}' \
+                 | jq -r '[.[] | select(. != "post")] | join(", ")')
+          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
+
+      # ── Default: log to a pinned tracking issue (#1) ────────────────────────
+      - name: Log to tracking issue
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: 1
+          body: |
+            ### ✦ New post: ${{ steps.details.outputs.title }}
+            **By:** @${{ steps.details.outputs.author }}
+            **Tags:** ${{ steps.details.outputs.tags }}
+            **Link:** ${{ steps.details.outputs.url }}
+
+      # ── Option A: Slack ─────────────────────────────────────────────────────
+      # Add secret SLACK_WEBHOOK_URL, then uncomment.
+      # - name: Notify Slack
+      #   env:
+      #     SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+      #   run: |
+      #     curl -fsS -X POST "$SLACK_WEBHOOK" \
+      #       -H 'Content-Type: application/json' \
+      #       -d @- <<EOF
+      #     {
+      #       "text": "✦ *${{ steps.details.outputs.title }}* by ${{ steps.details.outputs.author }}\n${{ steps.details.outputs.url }}"
+      #     }
+      #     EOF
+
+      # ── Option B: Discord ───────────────────────────────────────────────────
+      # Add secret DISCORD_WEBHOOK_URL, then uncomment.
+      # - name: Notify Discord
+      #   env:
+      #     DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      #   run: |
+      #     curl -fsS -X POST "$DISCORD_WEBHOOK" \
+      #       -H 'Content-Type: application/json' \
+      #       -d @- <<EOF
+      #     {
+      #       "embeds": [{
+      #         "title": "✦ ${{ steps.details.outputs.title }}",
+      #         "description": "by **${{ steps.details.outputs.author }}** — ${{ steps.details.outputs.tags }}",
+      #         "url": "${{ steps.details.outputs.url }}",
+      #         "color": 3461997
+      #       }]
+      #     }
+      #     EOF
+
+      # ── Option C: Email ─────────────────────────────────────────────────────
+      # Add secrets SMTP_SERVER / SMTP_USERNAME / SMTP_PASSWORD / TEAM_EMAILS.
+      # - name: Send email
+      #   uses: dawidd6/action-send-mail@v3
+      #   with:
+      #     server_address: ${{ secrets.SMTP_SERVER }}
+      #     server_port: 587
+      #     username: ${{ secrets.SMTP_USERNAME }}
+      #     password: ${{ secrets.SMTP_PASSWORD }}
+      #     subject: "✦ New post: ${{ steps.details.outputs.title }}"
+      #     to: ${{ secrets.TEAM_EMAILS }}
+      #     from: Pulse Bot
+      #     body: |
+      #       ${{ steps.details.outputs.author }} shared "${{ steps.details.outputs.title }}".
+      #       Read it: ${{ steps.details.outputs.url }}

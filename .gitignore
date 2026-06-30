@@ -1,0 +1,11 @@
+# This project intentionally has NO secrets in the repo. Still, guard against
+# accidentally committing anything sensitive while developing locally.
+.env
+.env.*
+*.local
+config.local.json
+.fri-config.json
+secrets.json
+.DS_Store
+Thumbs.db
+node_modules/

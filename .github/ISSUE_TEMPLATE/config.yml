@@ -1,0 +1,7 @@
+# Hides the "blank issue" option so every issue follows the post schema.
+# Remove this file if you want to allow free-form issues too.
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 How this project works
+    url: https://github.com/OWNER/REPO/blob/main/docs/ARCHITECTURE.md
+    about: Pages + Issues + Actions — read the architecture overview.
