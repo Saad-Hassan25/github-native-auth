@@ -42,19 +42,23 @@ admin token**. Full explanation + code walkthrough → **[docs/AUTHENTICATION.md
 Fork this, or copy these files into a new repository.
 
 ### 2. Configure the app
-Open [`index.html`](index.html) and edit the `CONFIG` block near the top — it's
-the only thing you must change:
+Open [`index.html`](index.html) and edit the `CONFIG` block near the top:
 
 ```js
 const CONFIG = {
   APP_NAME: "Pulse",
-  REPO: "OWNER/REPO",          // ← your repository, e.g. "octocat/knowledge-hub"
+  REPO: "OWNER/REPO",          // leave as-is to auto-detect on GitHub Pages
   LABEL: "post",               // issues with this label are posts
   AVAILABLE_TAGS: ["idea", "research", "tool", "question", "win"],
   PIN_LENGTH: 4,
   TOKEN_HELP_URL: "https://github.com/settings/tokens?type=beta"
 };
 ```
+
+**`REPO` is usually zero-config:** if you leave it as `"OWNER/REPO"` and serve
+the site from GitHub Pages (`https://<owner>.github.io/<repo>/`), the app derives
+`owner/repo` from the URL automatically. You only need to set it explicitly when
+using a **custom domain** or running **locally** (where the URL can't be parsed).
 
 ### 3. Enable GitHub Pages
 **Settings → Pages →** Source: *Deploy from a branch* → `main` / `root` → **Save**.

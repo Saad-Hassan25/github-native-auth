@@ -103,9 +103,27 @@
   .post .labels { margin-top: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
   .post .labels span { font-size: 11px; padding: 2px 8px; background: var(--field); border: 1px solid var(--border); color: var(--muted); }
   .post .actions { margin-top: 14px; display: flex; gap: 12px; align-items: center; }
-  .post .react { background: var(--field); border: 1px solid var(--border); color: var(--text); padding: 4px 12px; font-size: 13px; }
-  .post .react:hover { border-color: var(--border-strong); }
+  .post .react, .post .mini { background: var(--field); border: 1px solid var(--border); color: var(--text); padding: 4px 12px; font-size: 13px; }
+  .post .react:hover, .post .mini:hover { border-color: var(--border-strong); }
+  .post .mini.danger { color: var(--danger); }
   .post a.open { font-size: 13px; color: var(--link); margin-left: auto; }
+
+  /* Inline post editor */
+  .post .etitle { margin-bottom: 8px; font-weight: 600; }
+  .post .ebody { min-height: 84px; }
+  .btn-row { display: flex; gap: 8px; margin-top: 10px; }
+
+  /* Comment thread */
+  .comments { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
+  .comment { padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .comment:last-of-type { border-bottom: none; }
+  .comment .meta { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .comment .meta img { width: 16px; height: 16px; border-radius: 50%; }
+  .comment .body { font-size: 13px; color: #c9d1d9; white-space: pre-wrap; word-break: break-word; }
+  .cempty { font-size: 13px; color: var(--muted); padding: 6px 0; }
+  .addc { margin-top: 12px; }
+  .addc textarea { min-height: 52px; }
+  .addc .mini { margin-top: 8px; }
 
   .toolbar { display: flex; gap: 8px; margin-bottom: 16px; }
   .toolbar input { flex: 1; }
@@ -165,7 +183,8 @@
  * -------------------------------------------------------------------------- */
 const CONFIG = {
   APP_NAME: "Pulse",                       // shown in the header
-  REPO: "OWNER/REPO",                       // e.g. "octocat/knowledge-hub" — your repo
+  REPO: "OWNER/REPO",                       // leave as-is to auto-detect on GitHub Pages,
+                                            // or set "owner/repo" (needed for custom domains / local dev)
   LABEL: "post",                            // issues with this label are treated as posts
   AVAILABLE_TAGS: ["idea", "research", "tool", "question", "win"],
   PIN_LENGTH: 4,                            // how many digits the unlock PIN has
@@ -174,6 +193,21 @@ const CONFIG = {
 
 const API = "https://api.github.com";
 const VAULT_KEY = "ghauth_vault";          // localStorage key for the encrypted token
+
+// Figure out which repo to talk to. An explicit CONFIG.REPO always wins;
+// otherwise derive owner/repo from a GitHub Pages URL
+// (https://<owner>.github.io/<repo>/). Custom domains and local dev can't be
+// detected — set CONFIG.REPO in those cases. Returns null when undetermined.
+function resolveRepo() {
+  if (CONFIG.REPO && CONFIG.REPO !== "OWNER/REPO") return CONFIG.REPO;
+  const m = location.hostname.match(/^([^.]+)\.github\.io$/i);
+  if (!m) return null;                                   // custom domain / localhost
+  const owner = m[1];
+  const seg = location.pathname.split("/").filter(Boolean)[0];
+  // Project page → owner/<repo>; user/org root page → owner/<owner>.github.io
+  return seg ? `${owner}/${seg}` : `${owner}/${owner}.github.io`;
+}
+const REPO = resolveRepo();
 
 /* ----------------------------------------------------------------------------
  * 2. CRYPTO  — turn a PIN into a key, then encrypt/decrypt the token with it.
@@ -261,7 +295,10 @@ const state = {
   posts: [],
   selectedTags: [],
   search: "",
-  busy: false
+  busy: false,
+  expanded: {},      // { [issueNumber]: true } — which posts have comments open
+  comments: {},      // { [issueNumber]: [comment, …] } — loaded comment cache
+  editing: null      // issue number currently being edited, or null
 };
 
 const app = document.getElementById("app");
@@ -313,7 +350,7 @@ function renderSetup() {
     <input id="tok" type="password" placeholder="github_pat_… or ghp_…" autocomplete="off">
     <div class="hint">
       <a href="${esc(CONFIG.TOKEN_HELP_URL)}" target="_blank" rel="noopener">Create a fine-grained token →</a>
-      &nbsp;Scope it to <code>${esc(CONFIG.REPO)}</code> with <b>Issues: Read &amp; write</b>.
+      &nbsp;Scope it to <code>${esc(REPO || "your repository")}</code> with <b>Issues: Read &amp; write</b>.
     </div>
 
     <label for="pin">Choose a ${CONFIG.PIN_LENGTH}-digit PIN</label>
@@ -423,11 +460,13 @@ async function doUnlock() {
  * 8. VIEW: the app  (Issues-as-database feed + composer)
  * -------------------------------------------------------------------------- */
 function renderApp() {
-  if (CONFIG.REPO === "OWNER/REPO") {
+  if (!REPO) {
     app.innerHTML = header() + `<div class="card">
       <h2>Configuration needed</h2>
-      <p class="lede">Edit <code>CONFIG.REPO</code> at the top of <code>index.html</code>
-      to point at your own repository, then reload.</p></div>`;
+      <p class="lede">The repository couldn't be auto-detected (this isn't a
+      <code>*.github.io</code> URL — e.g. a custom domain or local dev). Set
+      <code>CONFIG.REPO</code> to <code>"owner/repo"</code> at the top of
+      <code>index.html</code>, then reload.</p></div>`;
     bindLogout();
     return;
   }
@@ -465,8 +504,7 @@ function renderApp() {
   const s = document.getElementById("search");
   s.addEventListener("input", () => {
     state.search = s.value;
-    document.getElementById("feed").innerHTML = renderFeed();
-    bindFeed();
+    rerenderFeed();
   });
   bindFeed();
 }
@@ -484,38 +522,95 @@ function renderFeed() {
   if (!posts.length)
     return `<div class="empty">No posts yet. Be the first to share.</div>`;
 
-  return posts.map((p) => {
-    const tags = p.labels.map((l) => l.name).filter((n) => n !== CONFIG.LABEL);
-    const ups = (p.reactions && p.reactions["+1"]) || 0;
+  return posts.map(renderPost).join("");
+}
+
+// One post. Two layouts: normal, or an inline editor when this post is editing.
+function renderPost(p) {
+  if (String(state.editing) === String(p.number)) {
     return `<div class="post" data-num="${p.number}">
-      <h3>${esc(p.title)}</h3>
-      <div class="meta">
-        <img src="${esc(p.user.avatar_url)}" alt="">
-        <span>@${esc(p.user.login)}</span> ·
-        <span>${new Date(p.created_at).toLocaleDateString()}</span>
-      </div>
-      <div class="body">${esc(p.body || "")}</div>
-      ${tags.length ? `<div class="labels">${tags.map((t) => `<span>${esc(t)}</span>`).join("")}</div>` : ""}
-      <div class="actions">
-        <button class="react" data-num="${p.number}">👍 <span>${ups}</span></button>
-        <a class="open" href="${esc(p.html_url)}" target="_blank" rel="noopener">Open on GitHub →</a>
+      <input class="etitle" data-num="${p.number}" value="${esc(p.title)}">
+      <textarea class="ebody" data-num="${p.number}">${esc(p.body || "")}</textarea>
+      <div class="btn-row">
+        <button class="mini esave" data-num="${p.number}">Save</button>
+        <button class="mini ecancel" data-num="${p.number}">Cancel</button>
       </div>
     </div>`;
-  }).join("");
+  }
+  const tags = p.labels.map((l) => l.name).filter((n) => n !== CONFIG.LABEL);
+  const ups = (p.reactions && p.reactions["+1"]) || 0;
+  const mine = state.user && p.user.login === state.user.login;
+  const open = !!state.expanded[p.number];
+  return `<div class="post" data-num="${p.number}">
+    <h3>${esc(p.title)}</h3>
+    <div class="meta">
+      <img src="${esc(p.user.avatar_url)}" alt="">
+      <span>@${esc(p.user.login)}</span> ·
+      <span>${new Date(p.created_at).toLocaleDateString()}</span>
+    </div>
+    <div class="body">${esc(p.body || "")}</div>
+    ${tags.length ? `<div class="labels">${tags.map((t) => `<span>${esc(t)}</span>`).join("")}</div>` : ""}
+    <div class="actions">
+      <button class="react" data-num="${p.number}">👍 <span>${ups}</span></button>
+      <button class="mini ctoggle" data-num="${p.number}">Comments (${p.comments})</button>
+      ${mine ? `<button class="mini eopen" data-num="${p.number}">Edit</button>
+                <button class="mini danger ddel" data-num="${p.number}">Delete</button>` : ""}
+      <a class="open" href="${esc(p.html_url)}" target="_blank" rel="noopener">Open on GitHub →</a>
+    </div>
+    ${open ? renderComments(p.number) : ""}
+  </div>`;
+}
+
+// The comment thread for one post (issue comments), shown when expanded.
+function renderComments(num) {
+  const list = state.comments[num];
+  let inner;
+  if (list === undefined) inner = `<div class="cempty"><span class="spinner"></span> Loading comments…</div>`;
+  else if (!list.length) inner = `<div class="cempty">No comments yet.</div>`;
+  else inner = list.map((c) => `<div class="comment">
+      <div class="meta">
+        <img src="${esc(c.user.avatar_url)}" alt="">
+        <span>@${esc(c.user.login)}</span> ·
+        <span>${new Date(c.created_at).toLocaleDateString()}</span>
+      </div>
+      <div class="body">${esc(c.body || "")}</div>
+    </div>`).join("");
+  return `<div class="comments">
+    ${inner}
+    <div class="addc">
+      <textarea class="cinput" data-num="${num}" placeholder="Add a comment…"></textarea>
+      <button class="mini csend" data-num="${num}">Comment</button>
+    </div>
+  </div>`;
+}
+
+// Re-render just the feed and re-attach its handlers.
+function rerenderFeed() {
+  const f = document.getElementById("feed");
+  if (f) { f.innerHTML = renderFeed(); bindFeed(); }
 }
 
 function bindFeed() {
-  document.querySelectorAll(".react").forEach((b) =>
-    b.addEventListener("click", () => reactTo(b.dataset.num)));
+  const on = (sel, fn) => document.querySelectorAll(sel).forEach((b) =>
+    b.addEventListener("click", () => fn(b.dataset.num)));
+  on(".react", reactTo);
+  on(".ctoggle", toggleComments);
+  on(".csend", addComment);
+  on(".eopen", startEdit);
+  on(".ecancel", () => cancelEdit());
+  on(".esave", saveEdit);
+  on(".ddel", deletePost);
 }
 
 /* ---- data operations against GitHub Issues -------------------------------- */
 async function loadPosts() {
+  if (!REPO) return;                                 // nothing to fetch until configured
   state.busy = true;
-  if (state.view === "app") document.getElementById("feed").innerHTML = renderFeed();
+  state.expanded = {}; state.comments = {}; state.editing = null;   // start fresh
+  rerenderFeed();
   try {
     const issues = await gh(
-      `/repos/${CONFIG.REPO}/issues?state=open&labels=${encodeURIComponent(CONFIG.LABEL)}&per_page=50&sort=created&direction=desc`,
+      `/repos/${REPO}/issues?state=open&labels=${encodeURIComponent(CONFIG.LABEL)}&per_page=50&sort=created&direction=desc`,
       { token: state.token }
     );
     // The issues endpoint also returns PRs; filter them out.
@@ -524,7 +619,7 @@ async function loadPosts() {
     toast("Couldn't load posts: " + e.message, true);
   } finally {
     state.busy = false;
-    if (state.view === "app") { document.getElementById("feed").innerHTML = renderFeed(); bindFeed(); }
+    rerenderFeed();
   }
 }
 
@@ -537,7 +632,7 @@ async function doPost() {
   try {
     // One new Issue = one new post. The CONFIG.LABEL marks it as ours;
     // selected tags become extra labels (GitHub creates them if missing).
-    const created = await gh(`/repos/${CONFIG.REPO}/issues`, {
+    const created = await gh(`/repos/${REPO}/issues`, {
       method: "POST",
       token: state.token,
       body: { title, body, labels: [CONFIG.LABEL, ...state.selectedTags] }
@@ -554,15 +649,90 @@ async function doPost() {
 
 async function reactTo(num) {
   try {
-    await gh(`/repos/${CONFIG.REPO}/issues/${num}/reactions`, {
+    await gh(`/repos/${REPO}/issues/${num}/reactions`, {
       method: "POST", token: state.token, body: { content: "+1" }
     });
     const p = state.posts.find((x) => String(x.number) === String(num));
     if (p) { p.reactions = p.reactions || {}; p.reactions["+1"] = (p.reactions["+1"] || 0) + 1; }
-    document.getElementById("feed").innerHTML = renderFeed();
-    bindFeed();
+    rerenderFeed();
   } catch (e) {
     toast("Reaction failed: " + e.message, true);
+  }
+}
+
+// ---- comments -------------------------------------------------------------
+async function toggleComments(num) {
+  const open = !state.expanded[num];
+  state.expanded[num] = open;
+  rerenderFeed();
+  if (open && state.comments[num] === undefined) {       // lazy-load once
+    try {
+      state.comments[num] = await gh(
+        `/repos/${REPO}/issues/${num}/comments?per_page=100`, { token: state.token });
+    } catch (e) {
+      state.comments[num] = [];
+      toast("Couldn't load comments: " + e.message, true);
+    }
+    rerenderFeed();
+  }
+}
+
+async function addComment(num) {
+  const ta = document.querySelector(`.cinput[data-num="${num}"]`);
+  const body = ((ta && ta.value) || "").trim();
+  if (!body) return toast("Write a comment first.", true);
+  try {
+    const c = await gh(`/repos/${REPO}/issues/${num}/comments`,
+      { method: "POST", token: state.token, body: { body } });
+    state.comments[num] = (state.comments[num] || []).concat(c);
+    const p = state.posts.find((x) => String(x.number) === String(num));
+    if (p) p.comments = (p.comments || 0) + 1;
+    rerenderFeed();
+  } catch (e) {
+    toast("Comment failed: " + e.message, true);
+  }
+}
+
+// ---- edit / delete (your own posts only) ----------------------------------
+function startEdit(num) {
+  state.editing = num;
+  rerenderFeed();
+  const el = document.querySelector(`.ebody[data-num="${num}"]`);
+  if (el) el.focus();
+}
+function cancelEdit() { state.editing = null; rerenderFeed(); }
+
+async function saveEdit(num) {
+  const t = document.querySelector(`.etitle[data-num="${num}"]`);
+  const b = document.querySelector(`.ebody[data-num="${num}"]`);
+  const title = ((t && t.value) || "").trim();
+  const body = ((b && b.value) || "").trim();
+  if (!title) return toast("Title can't be empty.", true);
+  try {
+    const updated = await gh(`/repos/${REPO}/issues/${num}`,
+      { method: "PATCH", token: state.token, body: { title, body } });
+    const i = state.posts.findIndex((x) => String(x.number) === String(num));
+    if (i >= 0) { updated.reactions = state.posts[i].reactions; state.posts[i] = updated; }
+    state.editing = null;
+    rerenderFeed();
+    toast("Post updated.");
+  } catch (e) {
+    toast("Update failed: " + e.message, true);
+  }
+}
+
+async function deletePost(num) {
+  if (!confirm("Delete this post? It will be removed from the feed.")) return;
+  try {
+    // The REST API can't hard-delete an issue (that needs GraphQL + admin), so
+    // we close it. The feed only lists open issues, so it disappears from view.
+    await gh(`/repos/${REPO}/issues/${num}`,
+      { method: "PATCH", token: state.token, body: { state: "closed" } });
+    state.posts = state.posts.filter((x) => String(x.number) !== String(num));
+    rerenderFeed();
+    toast("Post deleted.");
+  } catch (e) {
+    toast("Delete failed: " + e.message, true);
   }
 }
 
@@ -580,6 +750,7 @@ function bindLogout() {
   if (b) b.addEventListener("click", () => {
     // "Lock" just drops the in-memory token; the encrypted vault stays.
     state.token = null; state.user = null; state.posts = [];
+    state.expanded = {}; state.comments = {}; state.editing = null;
     state.view = "unlock"; render();
   });
 }

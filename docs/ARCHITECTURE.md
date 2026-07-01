@@ -63,7 +63,15 @@ token. Key calls used by `index.html`:
 | Who is this user? | `GET /user` |
 | List posts | `GET /repos/{owner}/{repo}/issues?labels=post&state=open` |
 | Create a post | `POST /repos/{owner}/{repo}/issues` |
+| Edit a post | `PATCH /repos/{owner}/{repo}/issues/{n}` |
+| Delete (archive) a post | `PATCH /repos/{owner}/{repo}/issues/{n}` with `state: closed` |
 | Upvote | `POST /repos/{owner}/{repo}/issues/{n}/reactions` |
+| List comments | `GET /repos/{owner}/{repo}/issues/{n}/comments` |
+| Add a comment | `POST /repos/{owner}/{repo}/issues/{n}/comments` |
+
+> Note: the REST API can't *hard-delete* an issue (that needs the GraphQL
+> `deleteIssue` mutation + admin rights), so "delete" closes the issue. The feed
+> only lists open issues, so it disappears from view.
 
 ### 4. GitHub Actions — automation
 `.github/workflows/notify.yml` triggers whenever an issue with the `post` label
